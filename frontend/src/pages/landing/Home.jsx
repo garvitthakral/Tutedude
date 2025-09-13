@@ -44,7 +44,7 @@ const Home = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.6, ease: "easeOut" }}
-          className="flex items-center gap-2 text-white py-2 px-4 rounded-lg bg-gray-800"
+          className="flex items-center gap-2 cursor-pointer text-white py-2 px-4 rounded-lg bg-gray-800 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-md"
           onClick={handleStartInterview}
         >
           Start Now <FaArrowRight />
