@@ -31,7 +31,10 @@ const ThankYou = () => {
         transition={{ delay: 0.6, duration: 0.8 }}
         className="mt-8"
       >
-        <button onClick={() => navigate("/")} className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-lg transition cursor-pointer">
+        <button
+          onClick={() => navigate("/")}
+          className="px-6 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-lg transition cursor-pointer"
+        >
           Back to Home
         </button>
       </motion.div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
+import useFaceDetection from "../../hook/FaceDetectorHook";
 
 const VideoCall = () => {
   const { interviewID } = useParams();
@@ -54,7 +55,7 @@ const VideoCall = () => {
       const a = document.createElement("a");
       a.style.display = "none";
       a.href = url;
-      a.download = `interview_${interviewID || "session"}_${Date.now()}.webm`;
+      a.download = `interview_${username}_${interviewID || "session"}_${Date.now()}.webm`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -137,6 +138,13 @@ const VideoCall = () => {
       }
     };
   }, []);
+
+  const handleProctorEvent = (event) => {
+    console.log("PROCTOR EVENT:", event);
+    // save to local state, send to backend, show UI badges, etc.
+  };
+
+  useFaceDetection({ videoRef, onProctorEvent: handleProctorEvent });
 
   return (
     <div>

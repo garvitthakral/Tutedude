@@ -1,0 +1,30 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/garvitthakral/Tutedude.git"
+  },
+  "author": "garvit thakral",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/garvitthakral/Tutedude/issues"
+  },
+  "homepage": "https://github.com/garvitthakral/Tutedude#readme",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "mongoose": "^8.18.1",
+    "nodemon": "^3.1.10",
+    "socket.io": "^4.8.1"
+  }
+}
