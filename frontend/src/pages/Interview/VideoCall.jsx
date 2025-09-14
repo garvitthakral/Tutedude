@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import useFaceDetection from "../../hook/FaceDetectorHook";
+import { useSocket } from "../../context/SocketContext.jsx";
 
 const VideoCall = () => {
   const { interviewID } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const socket = useSocket();
 
   const [username, setUsername] = useState(location.state?.username || "");
+  const [role, setRole] = useState(location.state?.role || "");
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -16,6 +19,7 @@ const VideoCall = () => {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordingStartRef = useRef(null);
+  const readyRef = useRef(false);
 
   // End call handler: stop recorder, stop camera, auto-download
   const handleEndCall = async () => {
@@ -34,32 +38,36 @@ const VideoCall = () => {
         videoRef.current = null;
       }
 
-      await new Promise((res) => setTimeout(res, 200));
+      if (role === "interviewer") {
+        await new Promise((res) => setTimeout(res, 200));
 
-      if (!recordedBlob && chunksRef.current.length > 0) {
-        const blob = new Blob(chunksRef.current, {
-          type: chunksRef.current[0]?.type || "video/webm",
-        });
-        setRecordedBlob(blob);
+        if (!recordedBlob && chunksRef.current.length > 0) {
+          const blob = new Blob(chunksRef.current, {
+            type: chunksRef.current[0]?.type || "video/webm",
+          });
+          setRecordedBlob(blob);
+        }
+
+        const blobToUse =
+          recordedBlob ||
+          (chunksRef.current.length ? new Blob(chunksRef.current) : null);
+
+        if (!blobToUse) {
+          throw new Error("No recorded data available to save.");
+        }
+
+        const url = URL.createObjectURL(blobToUse);
+        const a = document.createElement("a");
+        a.style.display = "none";
+        a.href = url;
+        a.download = `interview_${username}_${
+          interviewID || "session"
+        }_${Date.now()}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
       }
-
-      const blobToUse =
-        recordedBlob ||
-        (chunksRef.current.length ? new Blob(chunksRef.current) : null);
-
-      if (!blobToUse) {
-        throw new Error("No recorded data available to save.");
-      }
-
-      const url = URL.createObjectURL(blobToUse);
-      const a = document.createElement("a");
-      a.style.display = "none";
-      a.href = url;
-      a.download = `interview_${username}_${interviewID || "session"}_${Date.now()}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
 
       navigate("/thank-you");
     } catch (error) {
@@ -68,7 +76,22 @@ const VideoCall = () => {
   };
 
   useEffect(() => {
+    console.log(username, readyRef.current, role, interviewID);
+    if (!username) {
+      navigate("/");
+      return;
+    }
+
+    readyRef.current = true;
+    console.log("enttering room");
+    socket.emit("joinRoom", interviewID, username);
+  }, []);
+
+  useEffect(() => {
+    console.log(username, readyRef.current, role, interviewID);
+    if (!readyRef.current) return;
     const startVideoAndRecord = async () => {
+      console.log("now media will be taken");
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 1280, height: 720 },
@@ -79,44 +102,46 @@ const VideoCall = () => {
         }
         setIsCameraOn(true);
 
-        if (recordingStartRef.current) return;
-        recordingStartRef.current = true;
+        if (role === "interviewer") {
+          if (recordingStartRef.current) return;
+          recordingStartRef.current = true;
 
-        // recording logic
-        chunksRef.current = [];
-        let mimeType = "video/webm; codecs=vp9";
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          const fallbacks = ["video/webm; codecs=vp8", "video/webm"];
-          mimeType =
-            fallbacks.find((m) => MediaRecorder.isTypeSupported(m)) || "";
-        }
-
-        const recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType })
-          : new MediaRecorder(stream);
-        mediaRecorderRef.current = recorder;
-
-        recorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            chunksRef.current.push(event.data);
+          // recording logic
+          chunksRef.current = [];
+          let mimeType = "video/webm; codecs=vp9";
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            const fallbacks = ["video/webm; codecs=vp8", "video/webm"];
+            mimeType =
+              fallbacks.find((m) => MediaRecorder.isTypeSupported(m)) || "";
           }
-        };
 
-        recorder.onstop = () => {
-          const blob = new Blob(chunksRef.current, {
-            type: chunksRef.current[0]?.type || "video/webm",
-          });
-          setRecordedBlob(blob);
-        };
+          const recorder = mimeType
+            ? new MediaRecorder(stream, { mimeType })
+            : new MediaRecorder(stream);
+          mediaRecorderRef.current = recorder;
 
-        recorder.onerror = (ev) => {
-          console.error("MediaRecorder error:", ev);
-          setError("Recording error");
-        };
+          recorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              chunksRef.current.push(event.data);
+            }
+          };
 
-        recorder.start(1000); // start recording immediately
-        console.log("Recording started...");
-        setIsRecording(true);
+          recorder.onstop = () => {
+            const blob = new Blob(chunksRef.current, {
+              type: chunksRef.current[0]?.type || "video/webm",
+            });
+            setRecordedBlob(blob);
+          };
+
+          recorder.onerror = (ev) => {
+            console.error("MediaRecorder error:", ev);
+            setError("Recording error");
+          };
+
+          recorder.start(1000); // start recording immediately
+          console.log("Recording started...");
+          setIsRecording(true);
+        }
       } catch (error) {
         setIsCameraOn(false);
         console.error("Error accessing media devices.", error);
@@ -144,13 +169,18 @@ const VideoCall = () => {
     // save to local state, send to backend, show UI badges, etc.
   };
 
-  useFaceDetection({ videoRef, onProctorEvent: handleProctorEvent });
+  useFaceDetection({
+    videoRef,
+    onProctorEvent: handleProctorEvent,
+    enabled: role === "candidate",
+  });
 
   return (
     <div>
       <h1>Video Call</h1>
       <p>Interview ID: {interviewID}</p>
       <p>Username: {username}</p>
+      <p>Role: {role}</p>
       <video
         ref={videoRef}
         autoPlay

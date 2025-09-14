@@ -14,9 +14,9 @@ const connectToServer = (httpServer) => {
   io.on("connect", (socket) => {
     console.log("A user connected:", socket.id);
 
-    socket.on("joinRoom", (roomID) => {
+    socket.on("joinRoom", (roomID, username) => {
       socket.join(roomID);
-      console.log(`User ${socket.id} joined room ${roomID}`);
+      console.log(`User ${socket.id}: ${username} joined room ${roomID}`);
     });
 
     socket.on("leaveRoom", (roomID) => {

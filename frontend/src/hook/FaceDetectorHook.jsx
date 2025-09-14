@@ -2,7 +2,11 @@ import { useEffect, useRef } from "react";
 import * as faceMesh from "@mediapipe/face_mesh";
 import { Camera } from "@mediapipe/camera_utils";
 
-export default function useFaceDetection({ videoRef, onProctorEvent }) {
+export default function useFaceDetection({
+  videoRef,
+  onProctorEvent,
+  enabled,
+}) {
   const meshRef = useRef(null);
   const cameraRef = useRef(null);
 
@@ -17,6 +21,7 @@ export default function useFaceDetection({ videoRef, onProctorEvent }) {
   });
 
   useEffect(() => {
+    if (!enabled) return;
     if (!videoRef?.current) return;
 
     const onResults = (results) => {
@@ -48,12 +53,8 @@ export default function useFaceDetection({ videoRef, onProctorEvent }) {
         currentlyFlagged.current.multipleFaces = false;
       }
 
-      // 3) simple looking-away heuristic using face landmarks
-      // Use the nose tip and left/right eye to estimate yaw/pitch roughly
       const fml = results.multiFaceLandmarks && results.multiFaceLandmarks[0];
       if (fml) {
-        // pick points: 1 = right eye outer, 33 = left eye outer, 1 or 4 nose? (face_mesh indices vary)
-        // We'll use approximate indices: 1 (right), 33 (left), 1.. you'll fine-tune later
         try {
           const leftEye = fml[33];
           const rightEye = fml[263];
@@ -62,10 +63,10 @@ export default function useFaceDetection({ videoRef, onProctorEvent }) {
           // compute horizontal gaze proxy: eye-mid x vs nose x
           const eyeMidX = (leftEye.x + rightEye.x) / 2;
           const noseX = noseTip.x;
-          const offset = eyeMidX - noseX; // positive = looking one side, negative = other
+          const offset = eyeMidX - noseX;
 
-          // compute a rough threshold (tweak in practice)
-          const LOOK_AWAY_THRESHOLD = 0.035; // small fraction of normalized coords
+          // compute a rough threshold
+          const LOOK_AWAY_THRESHOLD = 0.035;
           if (Math.abs(offset) > LOOK_AWAY_THRESHOLD) {
             if (!lastLookingAwayAtRef.current)
               lastLookingAwayAtRef.current = now;
@@ -146,8 +147,7 @@ export default function useFaceDetection({ videoRef, onProctorEvent }) {
         meshRef.current?.close();
       } catch (e) {}
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoRef.current]);
 
-  return null; // hook only
+  return null;
 }

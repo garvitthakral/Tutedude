@@ -6,11 +6,9 @@ import { BrowserRouter } from "react-router";
 import { SocketProvider } from "./context/SocketContext.jsx";
 
 createRoot(document.getElementById("root")).render(
-  <StrictMode>
-    <BrowserRouter>
-      <SocketProvider>
-        <App />
-      </SocketProvider>
-    </BrowserRouter>
-  </StrictMode>
+  <BrowserRouter>
+    <SocketProvider>
+      <App />
+    </SocketProvider>
+  </BrowserRouter>
 );
