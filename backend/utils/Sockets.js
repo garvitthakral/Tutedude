@@ -23,6 +23,16 @@ const connectToServer = (httpServer) => {
       socket.leave(roomID);
       console.log(`User ${socket.id} left room ${roomID}`);
     });
+
+    socket.on("submit-report", ({newData}) => {
+      console.log(newData);
+    })
+
+    socket.on("Red-Alert", ({interviewID, username, label}) => {
+      console.log("enter in red", interviewID, username, label)
+      socket.to(interviewID).emit("Received-Red-Alert", {label, username});
+      console.log("check")
+    })
   });
   return io;
 };

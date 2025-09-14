@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import useFaceDetection from "../../hook/FaceDetectorHook";
 import { useSocket } from "../../context/SocketContext.jsx";
+import useObjectDetection from "../../hook/useObjectDetection.jsx";
+import { motion, AnimatePresence } from "framer-motion";
 
 const VideoCall = () => {
   const { interviewID } = useParams();
@@ -14,12 +16,42 @@ const VideoCall = () => {
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [showRedAlert, setShowRedAlert] = useState(false);
+  const [redAlert, setRedAlert] = useState({
+    label: "",
+    name: "",
+  });
+  const [meetingData, setMeetingData] = useState({
+    name: location.state?.username || "",
+    start: new Date().toISOString(),
+    end: new Date().toISOString(),
+    events: [],
+    duration: 0,
+    length: 0,
+    score: 0,
+  });
 
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordingStartRef = useRef(null);
   const readyRef = useRef(false);
+
+  const alertVariants = {
+    hidden: { opacity: 0, x: 50, scale: 0.95 },
+    visible: {
+      opacity: 1,
+      x: 0,
+      scale: 1,
+      transition: { duration: 0.5, ease: "easeOut" },
+    },
+    exit: {
+      opacity: 0,
+      x: 50,
+      scale: 0.95,
+      transition: { duration: 0.4, ease: "easeIn" },
+    },
+  };
 
   // End call handler: stop recorder, stop camera, auto-download
   const handleEndCall = async () => {
@@ -38,7 +70,7 @@ const VideoCall = () => {
         videoRef.current = null;
       }
 
-      if (role === "interviewer") {
+      if (role !== "interviewer") {
         await new Promise((res) => setTimeout(res, 200));
 
         if (!recordedBlob && chunksRef.current.length > 0) {
@@ -69,10 +101,16 @@ const VideoCall = () => {
         URL.revokeObjectURL(url);
       }
 
+      handleSubmit();
       navigate("/thank-you");
     } catch (error) {
       console.error("Error ending call:", error);
     }
+  };
+
+  const handleSubmit = () => {
+    const newData = { ...meetingData, end: new Date().toISOString()};
+    socket.emit("submit-report", { newData });
   };
 
   useEffect(() => {
@@ -85,6 +123,7 @@ const VideoCall = () => {
     readyRef.current = true;
     console.log("enttering room");
     socket.emit("joinRoom", interviewID, username);
+    setMeetingData((prev) => ({ ...prev, start: new Date().toISOString() }));
   }, []);
 
   useEffect(() => {
@@ -102,10 +141,9 @@ const VideoCall = () => {
         }
         setIsCameraOn(true);
 
-        if (role === "interviewer") {
-          if (recordingStartRef.current) return;
-          recordingStartRef.current = true;
-
+        if (recordingStartRef.current) return;
+        recordingStartRef.current = true;
+        if (role !== "interviewer") {
           // recording logic
           chunksRef.current = [];
           let mimeType = "video/webm; codecs=vp9";
@@ -164,9 +202,40 @@ const VideoCall = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!socket) return;
+
+    // keep ref to timeout so we can clear on unmount
+    const timeoutRef = { id: null };
+
+    const handleReceivedRedAlert = ({ label, username }) => {
+      console.log("Received-Red-Alert:", label, username);
+      setRedAlert({ label, name: username });
+      setShowRedAlert(true);
+
+      // clear any previous timeout
+      if (timeoutRef.id) clearTimeout(timeoutRef.id);
+
+      // hide after 100s
+      timeoutRef.id = setTimeout(() => {
+        setShowRedAlert(false);
+        timeoutRef.id = null;
+      }, 10000);
+    };
+
+    // attach listener once
+    socket.on("Received-Red-Alert", handleReceivedRedAlert);
+    console.log("Listening for Received-Red-Alert");
+
+    // cleanup when socket changes / component unmounts
+    return () => {
+      socket.off("Received-Red-Alert", handleReceivedRedAlert);
+      if (timeoutRef.id) clearTimeout(timeoutRef.id);
+    };
+  }, [socket]);
+
   const handleProctorEvent = (event) => {
     console.log("PROCTOR EVENT:", event);
-    // save to local state, send to backend, show UI badges, etc.
   };
 
   useFaceDetection({
@@ -175,8 +244,36 @@ const VideoCall = () => {
     enabled: role === "candidate",
   });
 
+  const handleItemDetected = (event) => {
+    console.log("ITEM DETECTED", event);
+    const { type, label, score, timestamp, snapshot } = event;
+    socket.emit("Red-Alert", { interviewID, username, label });
+  };
+
+  // run detection only for candidate
+  useObjectDetection(
+    videoRef,
+    handleItemDetected,
+    role === "candidate" // enabled only for candidate
+  );
+
   return (
     <div>
+      <AnimatePresence>
+        {showRedAlert && (
+          <motion.div
+            className="absolute top-10 right-10"
+            variants={alertVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+          >
+            <h1 className="bg-blue-800 text-white py-2 px-4 rounded-lg shadow-lg">
+              🚨 {redAlert?.name} is using {redAlert?.label}
+            </h1>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <h1>Video Call</h1>
       <p>Interview ID: {interviewID}</p>
       <p>Username: {username}</p>

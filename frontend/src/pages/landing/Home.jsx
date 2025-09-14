@@ -78,7 +78,7 @@ const Home = () => {
           className="flex items-center gap-2 cursor-pointer text-white py-2 px-4 rounded-lg bg-gray-800 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-md"
           onClick={handleGenerateKey}
         >
-          generate <MdKey />
+          Generate <MdKey />
         </motion.button>
       </div>
       <div className="mt-4 flex items-center justify-center gap-3 min-w-2xl">
