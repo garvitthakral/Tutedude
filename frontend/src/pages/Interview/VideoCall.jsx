@@ -112,7 +112,9 @@ const VideoCall = () => {
         handleSubmit();
       }
 
-      navigate("/thank-you");
+      navigate("/thank-you", {
+        state: { role },
+      });
     } catch (error) {
       console.error("Error ending call:", error);
     }
@@ -308,119 +310,113 @@ const VideoCall = () => {
   }, [socket]);
 
   // WebRTC signaling handlers
-    useEffect(() => {
-      const handleOffer = async ({ offer, from }) => {
-        console.log(`📥 Received offer from ${from}`);
-        console.log("📋 Offer details:", offer);
+  useEffect(() => {
+    const handleOffer = async ({ offer, from }) => {
+      console.log(`📥 Received offer from ${from}`);
+      console.log("📋 Offer details:", offer);
 
-        const peerConnection = createPeerConnection(from);
-        setPeerConnections((prev) => new Map(prev.set(from, peerConnection)));
+      const peerConnection = createPeerConnection(from);
+      setPeerConnections((prev) => new Map(prev.set(from, peerConnection)));
 
+      try {
+        await peerConnection.setRemoteDescription(offer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        console.log(`📤 Sending answer to ${from}`);
+
+        socketApi.emit("answer", {
+          interviewID,
+          answer,
+          to: from,
+        });
+      } catch (error) {
+        console.error("❌ Error handling offer:", error);
+      }
+    };
+
+    const handleAnswer = async ({ answer, from }) => {
+      console.log(`📥 Received answer from ${from}`);
+      console.log("📋 Answer details:", answer);
+
+      const peerConnection = peerConnections.get(from);
+      if (peerConnection) {
         try {
-          await peerConnection.setRemoteDescription(offer);
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          console.log(`📤 Sending answer to ${from}`);
-
-          socketApi.emit("answer", {
-            interviewID,
-            answer,
-            to: from,
-          });
+          await peerConnection.setRemoteDescription(answer);
+          console.log(`✅ Set remote description for ${from}`);
         } catch (error) {
-          console.error("❌ Error handling offer:", error);
+          console.error("❌ Error setting remote description:", error);
         }
-      };
+      }
+    };
 
-      const handleAnswer = async ({ answer, from }) => {
-        console.log(`📥 Received answer from ${from}`);
-        console.log("📋 Answer details:", answer);
+    const handleIceCandidate = async ({ candidate, from }) => {
+      console.log(`🧊 Received ICE candidate from ${from}`);
 
-        const peerConnection = peerConnections.get(from);
-        if (peerConnection) {
-          try {
-            await peerConnection.setRemoteDescription(answer);
-            console.log(`✅ Set remote description for ${from}`);
-          } catch (error) {
-            console.error("❌ Error setting remote description:", error);
-          }
+      const peerConnection = peerConnections.get(from);
+      if (peerConnection) {
+        try {
+          await peerConnection.addIceCandidate(candidate);
+          console.log(`✅ Added ICE candidate for ${from}`);
+        } catch (error) {
+          console.error("❌ Error adding ICE candidate:", error);
         }
-      };
+      }
+    };
 
-      const handleIceCandidate = async ({ candidate, from }) => {
-        console.log(`🧊 Received ICE candidate from ${from}`);
+    const handleUserLeft = ({ socketId }) => {
+      console.log(`👋 User left: ${socketId}`);
 
-        const peerConnection = peerConnections.get(from);
-        if (peerConnection) {
-          try {
-            await peerConnection.addIceCandidate(candidate);
-            console.log(`✅ Added ICE candidate for ${from}`);
-          } catch (error) {
-            console.error("❌ Error adding ICE candidate:", error);
-          }
-        }
-      };
-
-      const handleUserLeft = ({ socketId }) => {
-        console.log(`👋 User left: ${socketId}`);
-
-        const peerConnection = peerConnections.get(socketId);
-        if (peerConnection) {
-          peerConnection.close();
-          setPeerConnections((prev) => {
-            const newMap = new Map(prev);
-            newMap.delete(socketId);
-            return newMap;
-          });
-        }
-
-        setRemoteStreams((prev) => {
+      const peerConnection = peerConnections.get(socketId);
+      if (peerConnection) {
+        peerConnection.close();
+        setPeerConnections((prev) => {
           const newMap = new Map(prev);
           newMap.delete(socketId);
           return newMap;
         });
-      };
+      }
 
-      const handleUserJoined = async ({
-        username: joinedUsername,
-        socketId,
-      }) => {
-        console.log(`👋 ${joinedUsername} joined the room with ${socketId}`);
+      setRemoteStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(socketId);
+        return newMap;
+      });
+    };
 
-        const peerConnection = createPeerConnection(socketId);
-        setPeerConnections(
-          (prev) => new Map(prev.set(socketId, peerConnection))
-        );
+    const handleUserJoined = async ({ username: joinedUsername, socketId }) => {
+      console.log(`👋 ${joinedUsername} joined the room with ${socketId}`);
 
-        try {
-          const offer = await peerConnection.createOffer();
-          await peerConnection.setLocalDescription(offer);
-          console.log(`📤 Sending offer to ${socketId}`);
+      const peerConnection = createPeerConnection(socketId);
+      setPeerConnections((prev) => new Map(prev.set(socketId, peerConnection)));
 
-          socketApi.emit("offer", {
-            interviewID,
-            offer,
-            to: socketId,
-          });
-        } catch (error) {
-          console.error("❌ Error creating offer:", error);
-        }
-      };
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        console.log(`📤 Sending offer to ${socketId}`);
 
-      socketApi.on("user-joined", handleUserJoined);
-      socketApi.on("offer", handleOffer);
-      socketApi.on("answer", handleAnswer);
-      socketApi.on("ice-candidate", handleIceCandidate);
-      socketApi.on("user-left", handleUserLeft);
+        socketApi.emit("offer", {
+          interviewID,
+          offer,
+          to: socketId,
+        });
+      } catch (error) {
+        console.error("❌ Error creating offer:", error);
+      }
+    };
 
-      return () => {
-        socketApi.off("offer", handleOffer);
-        socketApi.off("answer", handleAnswer);
-        socketApi.off("ice-candidate", handleIceCandidate);
-        socketApi.off("user-left", handleUserLeft);
-      };
-    }, [localStream, peerConnections, interviewID]);
+    socketApi.on("user-joined", handleUserJoined);
+    socketApi.on("offer", handleOffer);
+    socketApi.on("answer", handleAnswer);
+    socketApi.on("ice-candidate", handleIceCandidate);
+    socketApi.on("user-left", handleUserLeft);
 
+    return () => {
+      socketApi.off("offer", handleOffer);
+      socketApi.off("answer", handleAnswer);
+      socketApi.off("ice-candidate", handleIceCandidate);
+      socketApi.off("user-left", handleUserLeft);
+    };
+  }, [localStream, peerConnections, interviewID]);
 
   const handleProctorEvent = (event) => {
     console.log("PROCTOR EVENT:", event);
@@ -489,23 +485,24 @@ const VideoCall = () => {
           </div>
         ) : (
           Array.from(remoteStreams.entries()).map(([socketId, stream]) => {
-            if(remoteRef) {
+            if (remoteRef) {
               remoteRef.current.srcObject = stream;
             }
-            
+
             return (
-            <div key={socketId} className="relative m-2">
-              <video
-                ref={remoteRef}
-                autoPlay
-                playsInline
-                className="w-full h-full rounded-lg bg-gray-900"
-              />
-              <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-                {socketId.slice(0, 8)}...
+              <div key={socketId} className="relative m-2">
+                <video
+                  ref={remoteRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full rounded-lg bg-gray-900"
+                />
+                <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                  {socketId.slice(0, 8)}...
+                </div>
               </div>
-            </div>
-          )} )
+            );
+          })
         )}
       </div>
       {recordedBlob && (

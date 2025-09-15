@@ -3,3 +3,20 @@
 body {
   @apply bg-black text-white;
 }
+
+@layer utilities {
+  .scrollbar-custom {
+    scrollbar-width: thin;
+    scrollbar-color: #6366f1 #0f172a;
+  }
+  /* WebKit pseudo selectors need raw CSS */
+  .scrollbar-custom::-webkit-scrollbar { width: 10px; height:10px; }
+  .scrollbar-custom::-webkit-scrollbar-track { background: transparent; border-radius: 9999px; }
+  .scrollbar-custom::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #818cf8, #4f46e5);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .scrollbar-custom::-webkit-scrollbar-thumb:hover { filter: brightness(1.05); }
+}
