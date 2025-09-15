@@ -238,7 +238,7 @@ const VideoCall = () => {
   const handleProctorEvent = (event) => {
     console.log("PROCTOR EVENT:", event);
     const { details, timestamp, type } = event;
-    const newEvent = {type: type, stamp: timestamp, value: details};
+    const newEvent = {eventType: type, timestamp: timestamp, details: details};
     setMeetingData((prev) => ({...prev, events: [...prev.events, newEvent]}))
   };
 
@@ -251,7 +251,7 @@ const VideoCall = () => {
   const handleItemDetected = (event) => {
     console.log("ITEM DETECTED", event);
     const { type, label, score, timestamp, snapshot } = event;
-    const newEvent = {type: type, stamp: timestamp, value: label};
+    const newEvent = {eventType: type, timestamp: timestamp, details: label};
     setMeetingData((prev) => ({...prev, events: [...prev.events, newEvent]}))
     socket.emit("Red-Alert", { interviewID, username, label });
   };

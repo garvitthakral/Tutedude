@@ -39,7 +39,7 @@ const CandidateSchema = new mongoose.Schema(
     },
 
     interviewDuration: {
-      type: Number, // store as milliseconds
+      type: String, // store as milliseconds
     },
     focusLostCount: {
       type: Number,

@@ -8,8 +8,8 @@ export default function simpleComputeScore(events = [], base = 100) {
   let score = base;
 
   for (const ev of events) {
-    if (!ev || !ev.type) continue;
-    const t = ev.type;
+    if (!ev || !ev.eventType) continue;
+    const t = ev.eventType;
 
     if (t === "looking_away") {
       score -= 2;
@@ -24,7 +24,7 @@ export default function simpleComputeScore(events = [], base = 100) {
       continue;
     }
     if (t === "item_detected") {
-      const lbl = (ev.label || "").toLowerCase();
+      const lbl = (ev.details || "").toLowerCase();
 
       // simple keyword matching
       if (lbl.includes("phone") || lbl.includes("cell") || lbl.includes("mobile")) {
