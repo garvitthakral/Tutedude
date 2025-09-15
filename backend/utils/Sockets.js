@@ -1,4 +1,6 @@
 import { Server } from "socket.io";
+import formatDurationFromISOs from "../controllers/durationMeeting.js";
+import simpleComputeScore from "../controllers/scoreCal.js";
 
 let io;
 
@@ -24,15 +26,20 @@ const connectToServer = (httpServer) => {
       console.log(`User ${socket.id} left room ${roomID}`);
     });
 
-    socket.on("submit-report", ({newData}) => {
-      console.log(newData);
-    })
+    socket.on("submit-report", ({ newData }) => {
+      const { start, end, events, duration, score } = newData;
+      const time = formatDurationFromISOs(start, end);
+      const finalScore = simpleComputeScore(events);
 
-    socket.on("Red-Alert", ({interviewID, username, label}) => {
-      console.log("enter in red", interviewID, username, label)
-      socket.to(interviewID).emit("Received-Red-Alert", {label, username});
-      console.log("check")
-    })
+      const finalData = { ...newData, duration: time, score: finalScore};
+      console.log(finalData);
+    });
+
+    socket.on("Red-Alert", ({ interviewID, username, label }) => {
+      console.log("enter in red", interviewID, username, label);
+      socket.to(interviewID).emit("Received-Red-Alert", { label, username });
+      console.log("check");
+    });
   });
   return io;
 };

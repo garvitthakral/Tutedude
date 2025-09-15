@@ -44,7 +44,7 @@ export default function useFaceDetection({
           onProctorEvent?.({
             type: "multiple_faces",
             timestamp: new Date(now).toISOString(),
-            details: { count: multi },
+            details: multi ,
             // optionally include snapshotUrl (see below)
           });
         }
@@ -79,7 +79,7 @@ export default function useFaceDetection({
               onProctorEvent?.({
                 type: "looking_away",
                 timestamp: new Date(now).toISOString(),
-                details: { offset },
+                details: offset ,
               });
             }
           } else {
@@ -99,7 +99,7 @@ export default function useFaceDetection({
           onProctorEvent?.({
             type: "no_face",
             timestamp: new Date(now).toISOString(),
-            details: { durationMs: now - lastFaceSeenAtRef.current },
+            details: now - lastFaceSeenAtRef.current ,
           });
         }
       } else {

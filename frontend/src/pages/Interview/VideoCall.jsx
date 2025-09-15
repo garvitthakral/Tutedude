@@ -109,7 +109,8 @@ const VideoCall = () => {
   };
 
   const handleSubmit = () => {
-    const newData = { ...meetingData, end: new Date().toISOString()};
+    const newData = { ...meetingData, end: new Date().toISOString(),
+    length: meetingData.events.length,};
     socket.emit("submit-report", { newData });
   };
 
@@ -236,6 +237,9 @@ const VideoCall = () => {
 
   const handleProctorEvent = (event) => {
     console.log("PROCTOR EVENT:", event);
+    const { details, timestamp, type } = event;
+    const newEvent = {type: type, stamp: timestamp, value: details};
+    setMeetingData((prev) => ({...prev, events: [...prev.events, newEvent]}))
   };
 
   useFaceDetection({
@@ -247,6 +251,8 @@ const VideoCall = () => {
   const handleItemDetected = (event) => {
     console.log("ITEM DETECTED", event);
     const { type, label, score, timestamp, snapshot } = event;
+    const newEvent = {type: type, stamp: timestamp, value: label};
+    setMeetingData((prev) => ({...prev, events: [...prev.events, newEvent]}))
     socket.emit("Red-Alert", { interviewID, username, label });
   };
 
