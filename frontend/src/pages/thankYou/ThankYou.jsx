@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 import Loader from "../../components/Loader";
 import axiosApi from "../../api/AxiosApi";
-import { div } from "@tensorflow/tfjs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const ThankYou = () => {
   const navigate = useNavigate();
@@ -20,12 +21,59 @@ const ThankYou = () => {
     return "bg-red-500";
   };
 
-  const pretty = (iso) => new Date(iso).toLocaleString("en-IN", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "Asia/Kolkata",
+  const pretty = (iso) => {
+    new Date(iso).toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Kolkata",
+    });
+  };
 
-});
+  
+  const { head, body } = useMemo(() => {
+    const head = [
+      "No",
+      "Username",
+      "Start Time",
+      "End Time",
+      "Duration",
+      "Final Score",
+      "Focus Lost",
+      "Suspicious Events",
+      "Created At",
+      "Updated At / _id",
+    ];
+
+    const body = (Array.isArray(reports) ? reports : []).map((r, i) => {
+      const susp =
+        Array.isArray(r.suspiciousEvents) && r.suspiciousEvents.length > 0
+          ? r.suspiciousEvents
+              .map((ev) => {
+                const ts = ev.timestamp ? pretty(ev.timestamp) : "";
+                const details = ev.details ?? "";
+                return `${ev.eventType}${ts ? ` @ ${ts}` : ""}${
+                  details ? ` | ${details}` : ""
+                }`;
+              })
+              .join("; ")
+          : "None";
+
+      return [
+        i + 1,
+        r.username ?? "",
+        pretty(r.startTime),
+        pretty(r.endTime),
+        r.interviewDuration ?? "",
+        String(r.finalScore ?? ""),
+        String(r.focusLostCount ?? ""),
+        susp,
+        pretty(r.createdAt),
+        r.updatedAt ? pretty(r.updatedAt) : r._id ?? "",
+      ];
+    });
+
+    return { head, body };
+  }, [reports]);
 
   const handleFetchReports = async () => {
     setLoading(true);
@@ -45,8 +93,44 @@ const ThankYou = () => {
   };
 
   const handleDownloadPDF = () => {
-    
-  }
+    const doc = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
+    });
+
+    doc.setFontSize(16);
+    doc.text("Interview Reports", doc.internal.pageSize.getWidth() / 2, 14, {
+      align: "center",
+    });
+
+    autoTable(doc, {
+      head: [
+        [
+          "#",
+          "Username",
+          "Duration",
+          "Times focus lost",
+          "Suspicious events",
+          "Score",
+        ],
+      ],
+      body: reports.map((r, i) => [
+        i + 1,
+        r.username,
+        r.interviewDuration,
+        r.focusLostCount,
+        r.suspiciousEvents && r.suspiciousEvents.length > 0
+          ? r.suspiciousEvents.map((e) => e.eventType).join(", ")
+          : "None",
+        r.finalScore,
+      ]),
+      startY: 20,
+      styles: { fontSize: 10, cellPadding: 3 },
+    });
+
+    doc.save("interview_reports.pdf");
+  };
 
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-r from-gray-900 via-black to-gray-900 text-white px-4">
@@ -174,7 +258,7 @@ const ThankYou = () => {
             >
               <div className="col-span-1 bg-black/30 p-4 rounded-lg">
                 <p className="text-xs text-gray-400">Start Time</p>
-                <p className="mt-1 text-sm">{pretty(report.startTime)}</p>
+                <p className="mt-1 text-sm">{pretty(report.starTime)}</p>
 
                 <p className="text-xs text-gray-400 mt-4">End Time</p>
                 <p className="mt-1 text-sm">{pretty(report.endTime)}</p>

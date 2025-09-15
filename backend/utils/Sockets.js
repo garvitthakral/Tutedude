@@ -5,6 +5,13 @@ import Candidate from "../models/Candidate.js";
 
 let io;
 
+const pretty = (iso) =>
+    new Date(iso).toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Kolkata",
+    });
+
 const connectToServer = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
@@ -36,8 +43,8 @@ const connectToServer = (httpServer) => {
 
       const finalData = new Candidate({
         username: name,
-        startTime: start,
-        endTime: end,
+        startTime: pretty(start),
+        endTime: pretty(end),
         suspiciousEvents: events,
         interviewDuration: time,
         focusLostCount: events.length,

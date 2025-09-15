@@ -63,6 +63,13 @@ const VideoCall = () => {
     },
   };
 
+  const pretty = (iso) =>
+    new Date(iso).toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Kolkata",
+    });
+
   // End call handler: stop recorder, stop camera, auto-download
   const handleEndCall = async () => {
     try {
@@ -423,7 +430,7 @@ const VideoCall = () => {
     const { details, timestamp, type } = event;
     const newEvent = {
       eventType: type,
-      timestamp: timestamp,
+      timestamp: pretty(timestamp),
       details: details,
     };
     setMeetingData((prev) => ({ ...prev, events: [...prev.events, newEvent] }));
@@ -438,7 +445,11 @@ const VideoCall = () => {
   const handleItemDetected = (event) => {
     console.log("ITEM DETECTED", event);
     const { type, label, score, timestamp, snapshot } = event;
-    const newEvent = { eventType: type, timestamp: timestamp, details: label };
+    const newEvent = {
+      eventType: type,
+      timestamp: pretty(timestamp),
+      details: label,
+    };
     setMeetingData((prev) => ({ ...prev, events: [...prev.events, newEvent] }));
     socket.emit("Red-Alert", { interviewID, username, label });
   };
