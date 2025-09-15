@@ -20,6 +20,8 @@ const connectToServer = (httpServer) => {
     socket.on("joinRoom", (roomID, username) => {
       socket.join(roomID);
       console.log(`User ${socket.id}: ${username} joined room ${roomID}`);
+
+      socket.to(roomID).emit("user-joined", { username, socketId: socket.id });
     });
 
     socket.on("leaveRoom", (roomID) => {
@@ -49,6 +51,37 @@ const connectToServer = (httpServer) => {
       console.log("enter in red", interviewID, username, label);
       socket.to(interviewID).emit("Received-Red-Alert", { label, username });
       console.log("check");
+    });
+
+    //video call sockets
+    // socket.on("send-message-event", (messageData) => {
+    //   io.to(messageData.roomId).emit("receive-message-event", messageData);
+    // });
+
+    socket.on("offer", ({ roomId, offer, to }) => {
+      console.log("enter in offer")
+      socket.to(to).emit("offer", { offer, from: socket.id });
+    });
+
+    socket.on("answer", ({ roomId, answer, to }) => {
+      console.log("enter in ans")
+      socket.to(to).emit("answer", { answer, from: socket.id });
+    });
+
+    socket.on("ice-candidate", ({ roomId, candidate, to }) => {
+      console.log("enter in ice-candidate")
+      socket.to(to).emit("ice-candidate", { candidate, from: socket.id });
+    });
+
+    socket.on("leave-call", ({ roomId }) => {
+      console.log("enter in cll")
+      socket.to(roomId).emit("user-left", { socketId: socket.id });
+      socket.leave(roomId);
+    });
+
+    socket.on("disconnect", () => {
+      // Handle cleanup when user disconnects
+      socket.broadcast.emit("user-left", { socketId: socket.id });
     });
   });
   return io;

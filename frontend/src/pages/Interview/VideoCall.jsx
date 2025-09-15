@@ -4,6 +4,7 @@ import useFaceDetection from "../../hook/FaceDetectorHook";
 import { useSocket } from "../../context/SocketContext.jsx";
 import useObjectDetection from "../../hook/useObjectDetection.jsx";
 import { motion, AnimatePresence } from "framer-motion";
+import socketApi from "../../api/SocketApi.js";
 
 const VideoCall = () => {
   const { interviewID } = useParams();
@@ -32,10 +33,19 @@ const VideoCall = () => {
   });
 
   const videoRef = useRef(null);
+  const remoteRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordingStartRef = useRef(null);
   const readyRef = useRef(false);
+
+  //video call var
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState(new Map());
+  const [peerConnections, setPeerConnections] = useState(new Map());
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [mediaReady, setMediaReady] = useState(false);
 
   const alertVariants = {
     hidden: { opacity: 0, x: 50, scale: 0.95 },
@@ -99,9 +109,9 @@ const VideoCall = () => {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
+        handleSubmit();
       }
 
-      handleSubmit();
       navigate("/thank-you");
     } catch (error) {
       console.error("Error ending call:", error);
@@ -109,9 +119,67 @@ const VideoCall = () => {
   };
 
   const handleSubmit = () => {
-    const newData = { ...meetingData, end: new Date().toISOString(),
-    length: meetingData.events.length,};
+    const newData = {
+      ...meetingData,
+      end: new Date().toISOString(),
+      length: meetingData.events.length,
+    };
     socket.emit("submit-report", { newData });
+  };
+
+  const createPeerConnection = (socketId) => {
+    console.log(`🔗 Creating peer connection for ${socketId}`);
+
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+      ],
+      iceCandidatePoolSize: 10,
+    });
+
+    if (localStream) {
+      console.log(`📤 Adding local tracks to peer connection for ${socketId}`);
+      localStream.getTracks().forEach((track) => {
+        console.log(`📡 Adding track:`, track.kind, track.enabled);
+        peerConnection.addTrack(track, localStream);
+      });
+    }
+
+    peerConnection.ontrack = (event) => {
+      console.log(`📥 Received remote track from ${socketId}:`, event);
+      const [remoteStream] = event.streams;
+      console.log("🎥 Remote stream:", remoteStream);
+      console.log("📹 Remote video tracks:", remoteStream.getVideoTracks());
+      remoteRef.current = remoteStream;
+
+      setRemoteStreams((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(socketId, remoteStream);
+        console.log("🗺️ Updated remote streams map:", newMap);
+        return newMap;
+      });
+    };
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log(`🧊 Sending ICE candidate to ${socketId}`);
+        socketApi.emit("ice-candidate", {
+          interviewID,
+          candidate: event.candidate,
+          to: socketId,
+        });
+      }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      console.log(
+        `🔄 Connection state changed for ${socketId}:`,
+        peerConnection.connectionState
+      );
+    };
+
+    return peerConnection;
   };
 
   useEffect(() => {
@@ -135,11 +203,15 @@ const VideoCall = () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 1280, height: 720 },
-          audio: false,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
+        setLocalStream(stream);
         setIsCameraOn(true);
 
         if (recordingStartRef.current) return;
@@ -235,11 +307,130 @@ const VideoCall = () => {
     };
   }, [socket]);
 
+  // WebRTC signaling handlers
+    useEffect(() => {
+      const handleOffer = async ({ offer, from }) => {
+        console.log(`📥 Received offer from ${from}`);
+        console.log("📋 Offer details:", offer);
+
+        const peerConnection = createPeerConnection(from);
+        setPeerConnections((prev) => new Map(prev.set(from, peerConnection)));
+
+        try {
+          await peerConnection.setRemoteDescription(offer);
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          console.log(`📤 Sending answer to ${from}`);
+
+          socketApi.emit("answer", {
+            interviewID,
+            answer,
+            to: from,
+          });
+        } catch (error) {
+          console.error("❌ Error handling offer:", error);
+        }
+      };
+
+      const handleAnswer = async ({ answer, from }) => {
+        console.log(`📥 Received answer from ${from}`);
+        console.log("📋 Answer details:", answer);
+
+        const peerConnection = peerConnections.get(from);
+        if (peerConnection) {
+          try {
+            await peerConnection.setRemoteDescription(answer);
+            console.log(`✅ Set remote description for ${from}`);
+          } catch (error) {
+            console.error("❌ Error setting remote description:", error);
+          }
+        }
+      };
+
+      const handleIceCandidate = async ({ candidate, from }) => {
+        console.log(`🧊 Received ICE candidate from ${from}`);
+
+        const peerConnection = peerConnections.get(from);
+        if (peerConnection) {
+          try {
+            await peerConnection.addIceCandidate(candidate);
+            console.log(`✅ Added ICE candidate for ${from}`);
+          } catch (error) {
+            console.error("❌ Error adding ICE candidate:", error);
+          }
+        }
+      };
+
+      const handleUserLeft = ({ socketId }) => {
+        console.log(`👋 User left: ${socketId}`);
+
+        const peerConnection = peerConnections.get(socketId);
+        if (peerConnection) {
+          peerConnection.close();
+          setPeerConnections((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(socketId);
+            return newMap;
+          });
+        }
+
+        setRemoteStreams((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(socketId);
+          return newMap;
+        });
+      };
+
+      const handleUserJoined = async ({
+        username: joinedUsername,
+        socketId,
+      }) => {
+        console.log(`👋 ${joinedUsername} joined the room with ${socketId}`);
+
+        const peerConnection = createPeerConnection(socketId);
+        setPeerConnections(
+          (prev) => new Map(prev.set(socketId, peerConnection))
+        );
+
+        try {
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          console.log(`📤 Sending offer to ${socketId}`);
+
+          socketApi.emit("offer", {
+            interviewID,
+            offer,
+            to: socketId,
+          });
+        } catch (error) {
+          console.error("❌ Error creating offer:", error);
+        }
+      };
+
+      socketApi.on("user-joined", handleUserJoined);
+      socketApi.on("offer", handleOffer);
+      socketApi.on("answer", handleAnswer);
+      socketApi.on("ice-candidate", handleIceCandidate);
+      socketApi.on("user-left", handleUserLeft);
+
+      return () => {
+        socketApi.off("offer", handleOffer);
+        socketApi.off("answer", handleAnswer);
+        socketApi.off("ice-candidate", handleIceCandidate);
+        socketApi.off("user-left", handleUserLeft);
+      };
+    }, [localStream, peerConnections, interviewID]);
+
+
   const handleProctorEvent = (event) => {
     console.log("PROCTOR EVENT:", event);
     const { details, timestamp, type } = event;
-    const newEvent = {eventType: type, timestamp: timestamp, details: details};
-    setMeetingData((prev) => ({...prev, events: [...prev.events, newEvent]}))
+    const newEvent = {
+      eventType: type,
+      timestamp: timestamp,
+      details: details,
+    };
+    setMeetingData((prev) => ({ ...prev, events: [...prev.events, newEvent] }));
   };
 
   useFaceDetection({
@@ -251,8 +442,8 @@ const VideoCall = () => {
   const handleItemDetected = (event) => {
     console.log("ITEM DETECTED", event);
     const { type, label, score, timestamp, snapshot } = event;
-    const newEvent = {eventType: type, timestamp: timestamp, details: label};
-    setMeetingData((prev) => ({...prev, events: [...prev.events, newEvent]}))
+    const newEvent = { eventType: type, timestamp: timestamp, details: label };
+    setMeetingData((prev) => ({ ...prev, events: [...prev.events, newEvent] }));
     socket.emit("Red-Alert", { interviewID, username, label });
   };
 
@@ -268,7 +459,7 @@ const VideoCall = () => {
       <AnimatePresence>
         {showRedAlert && (
           <motion.div
-            className="absolute top-10 right-10"
+            className="absolute bottom-10 right-10 z-50"
             variants={alertVariants}
             initial="hidden"
             animate="visible"
@@ -288,8 +479,35 @@ const VideoCall = () => {
         ref={videoRef}
         autoPlay
         playsInline
-        className="w-4xl h-auto bg-black"
+        className="w-sm rounded-2xl absolute top-8 right-8 h-auto bg-black"
       />
+      <div className="w-4xl h-auto bg-black">
+        {remoteStreams.size === 0 ? (
+          <div className="text-center text-gray-400">
+            <div className="text-6xl mb-4">📹</div>
+            <div>Waiting for other participants...</div>
+          </div>
+        ) : (
+          Array.from(remoteStreams.entries()).map(([socketId, stream]) => {
+            if(remoteRef) {
+              remoteRef.current.srcObject = stream;
+            }
+            
+            return (
+            <div key={socketId} className="relative m-2">
+              <video
+                ref={remoteRef}
+                autoPlay
+                playsInline
+                className="w-full h-full rounded-lg bg-gray-900"
+              />
+              <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                {socketId.slice(0, 8)}...
+              </div>
+            </div>
+          )} )
+        )}
+      </div>
       {recordedBlob && (
         <p className="text-green-500 mt-2">Recording saved locally ✅</p>
       )}
