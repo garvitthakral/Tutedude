@@ -4,6 +4,7 @@ import simpleComputeScore from "../controllers/scoreCal.js";
 import Candidate from "../models/Candidate.js";
 
 let io;
+const FRONTEND = "https://tutedude-frontend-nche.onrender.com";
 
 const pretty = (iso) =>
   new Date(iso).toLocaleString("en-IN", {
@@ -14,15 +15,14 @@ const pretty = (iso) =>
 
 const connectToServer = (httpServer) => {
   io = new Server(httpServer, {
-    path: "/socket.io",
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-      credentials: true,
-    },
-    transports: ["websocket", "polling"],
-    withCredentials: true,
-  });
+  path: "/socket.io",
+  cors: {
+    origin: FRONTEND,  
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  transports: ["websocket", "polling"]
+});
 
   io.on("connect", (socket) => {
     console.log("A user connected:", socket.id);

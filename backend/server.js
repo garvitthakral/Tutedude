@@ -8,7 +8,7 @@ import mongoose from "mongoose";
 import { connectToServer } from "./utils/Sockets.js";
 import reportsRoutes from "./routes/reportsRoutes.js"
 
-
+const FRONTEND = "https://tutedude-frontend-nche.onrender.com";
 const PORT = process.env.PORT || 3002;
 const URL = process.env.MONGODB_URL || null;
 
@@ -18,8 +18,8 @@ const io = connectToServer(httpServer);
 app.use(express.json());
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://tutedude-frontend-nche.onrender.com"],
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: ["http://localhost:5173", FRONTEND],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
   })
 );
