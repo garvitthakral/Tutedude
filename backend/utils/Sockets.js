@@ -16,10 +16,7 @@ const connectToServer = (httpServer) => {
   io = new Server(httpServer, {
     path: "/socket.io",
     cors: {
-      origin: [
-        "http://localhost:5173",
-        "https://tutedude-frontend-nche.onrender.com",
-      ],
+      origin: "*",
       methods: ["GET", "POST"],
       credentials: true,
     },
