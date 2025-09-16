@@ -12,16 +12,13 @@ const VideoCall = () => {
   const navigate = useNavigate();
   const socket = useSocket();
 
-  const [username, setUsername] = useState(location.state?.username || "");
-  const [role, setRole] = useState(location.state?.role || "");
+  const [username] = useState(location.state?.username || "");
+  const [role] = useState(location.state?.role || "");
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [showRedAlert, setShowRedAlert] = useState(false);
-  const [redAlert, setRedAlert] = useState({
-    label: "",
-    name: "",
-  });
+  const [redAlert, setRedAlert] = useState({ label: "", name: "" });
   const [meetingData, setMeetingData] = useState({
     name: location.state?.username || "",
     start: new Date().toISOString(),
@@ -33,19 +30,19 @@ const VideoCall = () => {
   });
 
   const videoRef = useRef(null);
-  const remoteRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordingStartRef = useRef(null);
   const readyRef = useRef(false);
 
-  //video call var
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStreams, setRemoteStreams] = useState(new Map());
-  const [peerConnections, setPeerConnections] = useState(new Map());
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [mediaReady, setMediaReady] = useState(false);
+  const localStreamRef = useRef(null);
+  const peerConnectionsRef = useRef(new Map());
+  const remoteVideoRefs = useRef(new Map());
+  const makingOfferRef = useRef(new Map());
+  const ignoreOfferRef = useRef(new Map());
+  const pendingCandidatesRef = useRef(new Map());
+
+  const [remoteStreamsMap, setRemoteStreamsMap] = useState(new Map());
 
   const alertVariants = {
     hidden: { opacity: 0, x: 50, scale: 0.95 },
@@ -70,7 +67,6 @@ const VideoCall = () => {
       timeZone: "Asia/Kolkata",
     });
 
-  // End call handler: stop recorder, stop camera, auto-download
   const handleEndCall = async () => {
     try {
       if (
@@ -81,15 +77,14 @@ const VideoCall = () => {
         console.log("Recording stopped by user.");
       }
 
-      if (videoRef.current) {
+      if (videoRef.current && videoRef.current.srcObject) {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
         setIsCameraOn(false);
-        videoRef.current = null;
+        videoRef.current.srcObject = null;
       }
 
       if (role !== "interviewer") {
         await new Promise((res) => setTimeout(res, 200));
-
         if (!recordedBlob && chunksRef.current.length > 0) {
           const blob = new Blob(chunksRef.current, {
             type: chunksRef.current[0]?.type || "video/webm",
@@ -101,23 +96,32 @@ const VideoCall = () => {
           recordedBlob ||
           (chunksRef.current.length ? new Blob(chunksRef.current) : null);
 
-        if (!blobToUse) {
-          throw new Error("No recorded data available to save.");
+        if (blobToUse) {
+          const url = URL.createObjectURL(blobToUse);
+          const a = document.createElement("a");
+          a.style.display = "none";
+          a.href = url;
+          a.download = `interview_${username}_${
+            interviewID || "session"
+          }_${Date.now()}.webm`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          handleSubmit();
+        } else {
+          console.warn("No blob to save.");
         }
-
-        const url = URL.createObjectURL(blobToUse);
-        const a = document.createElement("a");
-        a.style.display = "none";
-        a.href = url;
-        a.download = `interview_${username}_${
-          interviewID || "session"
-        }_${Date.now()}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        handleSubmit();
       }
+
+      peerConnectionsRef.current.forEach((pc, id) => {
+        try {
+          pc.close();
+        } catch (e) {}
+      });
+      peerConnectionsRef.current.clear();
+      socketApi.emit("leave-call", { interviewID });
+      localStreamRef.current = null;
 
       navigate("/thank-you", {
         state: { role },
@@ -137,96 +141,144 @@ const VideoCall = () => {
   };
 
   const createPeerConnection = (socketId) => {
-    console.log(`🔗 Creating peer connection for ${socketId}`);
-
-    const peerConnection = new RTCPeerConnection({
+    console.log(`PC[${socketId}] => creating`);
+    const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
       ],
-      iceCandidatePoolSize: 10,
     });
 
+    // store candidate queue
+    pendingCandidatesRef.current.set(socketId, []);
+
+    // add local tracks if available
+    const localStream = localStreamRef.current;
     if (localStream) {
-      console.log(`📤 Adding local tracks to peer connection for ${socketId}`);
-      localStream.getTracks().forEach((track) => {
-        console.log(`📡 Adding track:`, track.kind, track.enabled);
-        peerConnection.addTrack(track, localStream);
-      });
+      localStream
+        .getTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
     }
 
-    peerConnection.ontrack = (event) => {
-      console.log(`📥 Received remote track from ${socketId}:`, event);
-      const [remoteStream] = event.streams;
-      console.log("🎥 Remote stream:", remoteStream);
-      console.log("📹 Remote video tracks:", remoteStream.getVideoTracks());
-      remoteRef.current = remoteStream;
+    // track negotiation state for perfect negotiation
+    makingOfferRef.current.set(socketId, false);
+    ignoreOfferRef.current.set(socketId, false);
 
-      setRemoteStreams((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(socketId, remoteStream);
-        console.log("🗺️ Updated remote streams map:", newMap);
-        return newMap;
-      });
-    };
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log(`🧊 Sending ICE candidate to ${socketId}`);
+    pc.onicecandidate = (evt) => {
+      if (evt.candidate) {
+        console.log(`ICE[${socketId}] => sending candidate`, evt.candidate);
         socketApi.emit("ice-candidate", {
           interviewID,
-          candidate: event.candidate,
+          candidate: evt.candidate,
           to: socketId,
         });
       }
     };
 
-    peerConnection.onconnectionstatechange = () => {
-      console.log(
-        `🔄 Connection state changed for ${socketId}:`,
-        peerConnection.connectionState
-      );
+    pc.ontrack = (event) => {
+      console.log(`TRACK[${socketId}] => ontrack`, event);
+      const [stream] = event.streams;
+      setRemoteStreamsMap((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(socketId, stream);
+        return newMap;
+      });
     };
 
-    return peerConnection;
+    pc.onconnectionstatechange = () => {
+      console.log(`PC[${socketId}] state:`, pc.connectionState);
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        try {
+          pc.close();
+        } catch (e) {}
+        peerConnectionsRef.current.delete(socketId);
+        setRemoteStreamsMap((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(socketId);
+          return newMap;
+        });
+      }
+    };
+
+    pc.onnegotiationneeded = async () => {
+      console.log(`NEG[${socketId}] => negotiationneeded`);
+      try {
+        makingOfferRef.current.set(socketId, true);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log(`OFFER[${socketId}] => emitting offer`);
+        socketApi.emit("offer", {
+          interviewID,
+          offer: pc.localDescription,
+          to: socketId,
+        });
+      } catch (err) {
+        console.error(`NEG[${socketId}] error:`, err);
+      } finally {
+        makingOfferRef.current.set(socketId, false);
+      }
+    };
+
+    return pc;
   };
 
   useEffect(() => {
-    console.log(username, readyRef.current, role, interviewID);
+    if (!localStreamRef.current) return;
+    peerConnectionsRef.current.forEach((pc, socketId) => {
+      try {
+        // check if tracks already added by seeing senders
+        const existingVideoSender = pc
+          .getSenders()
+          .find((s) => s.track && s.track.kind === "video");
+        if (!existingVideoSender) {
+          localStreamRef.current
+            .getTracks()
+            .forEach((t) => pc.addTrack(t, localStreamRef.current));
+          console.log(
+            `PC[${socketId}] => added local tracks after stream arrived`
+          );
+        }
+      } catch (e) {
+        console.error("Error adding tracks to PC:", e);
+      }
+    });
+  }, [isCameraOn]);
+
+  useEffect(() => {
+    console.log(
+      "init: username, readyRef",
+      username,
+      readyRef.current,
+      role,
+      interviewID
+    );
     if (!username) {
       navigate("/");
       return;
     }
-
     readyRef.current = true;
-    console.log("enttering room");
     socket.emit("joinRoom", interviewID, username);
     setMeetingData((prev) => ({ ...prev, start: new Date().toISOString() }));
   }, []);
 
   useEffect(() => {
-    console.log(username, readyRef.current, role, interviewID);
     if (!readyRef.current) return;
     const startVideoAndRecord = async () => {
-      console.log("now media will be taken");
       try {
+        console.log("now media will be taken");
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 1280, height: 720 },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
+          audio: { echoCancellation: true, noiseSuppression: true },
         });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setLocalStream(stream);
+
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        localStreamRef.current = stream;
         setIsCameraOn(true);
 
         if (recordingStartRef.current) return;
         recordingStartRef.current = true;
+
         if (role !== "interviewer") {
-          // recording logic
           chunksRef.current = [];
           let mimeType = "video/webm; codecs=vp9";
           if (!MediaRecorder.isTypeSupported(mimeType)) {
@@ -234,7 +286,6 @@ const VideoCall = () => {
             mimeType =
               fallbacks.find((m) => MediaRecorder.isTypeSupported(m)) || "";
           }
-
           const recorder = mimeType
             ? new MediaRecorder(stream, { mimeType })
             : new MediaRecorder(stream);
@@ -245,22 +296,17 @@ const VideoCall = () => {
               chunksRef.current.push(event.data);
             }
           };
-
           recorder.onstop = () => {
             const blob = new Blob(chunksRef.current, {
               type: chunksRef.current[0]?.type || "video/webm",
             });
             setRecordedBlob(blob);
           };
+          recorder.onerror = (ev) => console.error("MediaRecorder error:", ev);
 
-          recorder.onerror = (ev) => {
-            console.error("MediaRecorder error:", ev);
-            setError("Recording error");
-          };
-
-          recorder.start(1000); // start recording immediately
-          console.log("Recording started...");
+          recorder.start(1000);
           setIsRecording(true);
+          console.log("Recording started...");
         }
       } catch (error) {
         setIsCameraOn(false);
@@ -276,13 +322,181 @@ const VideoCall = () => {
         mediaRecorderRef.current.state !== "inactive"
       ) {
         mediaRecorderRef.current.stop();
-        console.log("Recording stopped...");
       }
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+        videoRef.current.srcObject = null;
       }
+      localStreamRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!socketApi) return;
+
+    const handleUserJoined = async ({ username: joinedUsername, socketId }) => {
+      console.log(`user-joined -> ${joinedUsername} ${socketId}`);
+      if (peerConnectionsRef.current.has(socketId)) {
+        console.log(`PC[${socketId}] already exists`);
+        return;
+      }
+      const pc = createPeerConnection(socketId);
+      peerConnectionsRef.current.set(socketId, pc);
+
+      // If local stream not ready, wait a bit (simple wait)
+      if (!localStreamRef.current) {
+        console.log(`PC[${socketId}] waiting for localStream...`);
+        await new Promise((res) => {
+          let attempts = 0;
+          const tick = () => {
+            if (localStreamRef.current || attempts > 100) return res();
+            attempts++;
+            setTimeout(tick, 50);
+          };
+          tick();
+        });
+      }
+
+      try {
+        makingOfferRef.current.set(socketId, true);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log(`OFFER[${socketId}] -> sending offer`);
+        socketApi.emit("offer", {
+          interviewID,
+          offer: pc.localDescription,
+          to: socketId,
+        });
+      } catch (e) {
+        console.error(`Error creating offer for ${socketId}`, e);
+      } finally {
+        makingOfferRef.current.set(socketId, false);
+      }
+    };
+
+    const handleOffer = async ({ offer, from }) => {
+      console.log(`OFFER[${from}] received`, offer);
+      const pcExists = peerConnectionsRef.current.has(from);
+      const pc = pcExists
+        ? peerConnectionsRef.current.get(from)
+        : createPeerConnection(from);
+      if (!pcExists) peerConnectionsRef.current.set(from, pc);
+
+      const makingOffer = makingOfferRef.current.get(from) || false;
+      const ignore = ignoreOfferRef.current.get(from) || false;
+      console.log(
+        `NEG[${from}] makingOffer=${makingOffer} ignore=${ignore} pc.signalingState=${pc.signalingState}`
+      );
+
+      if (makingOffer && pc.signalingState !== "stable") {
+        console.warn(`OFFER[${from}] ignored due to glare`);
+        ignoreOfferRef.current.set(from, true);
+        return;
+      }
+
+      ignoreOfferRef.current.set(from, false);
+
+      try {
+        await pc.setRemoteDescription(offer);
+        console.log(`OFFER[${from}] -> remote description set`);
+        const queued = pendingCandidatesRef.current.get(from) || [];
+        for (const c of queued) {
+          try {
+            await pc.addIceCandidate(c);
+            console.log(`ICE[${from}] -> applied queued candidate`);
+          } catch (e) {
+            console.error("Error applying queued candidate", e);
+          }
+        }
+        pendingCandidatesRef.current.set(from, []);
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log(`ANSWER[${from}] -> sending answer`);
+        socketApi.emit("answer", {
+          interviewID,
+          answer: pc.localDescription,
+          to: from,
+        });
+      } catch (err) {
+        console.error("Error handling offer", err);
+      }
+    };
+
+    const handleAnswer = async ({ answer, from }) => {
+      console.log(`ANSWER[${from}] received`);
+      const pc = peerConnectionsRef.current.get(from);
+      if (!pc) {
+        console.warn(`ANSWER[${from}] -> no pc exists`);
+        return;
+      }
+      try {
+        await pc.setRemoteDescription(answer);
+        console.log(`ANSWER[${from}] -> remote desc set`);
+      } catch (err) {
+        console.error("Error setting remote description (answer)", err);
+      }
+    };
+
+    const handleIceCandidate = async ({ candidate, from }) => {
+      // candidate may arrive before remote description set. queue it.
+      const pc = peerConnectionsRef.current.get(from);
+      if (!pc) {
+        // queue for later; create entry
+        const q = pendingCandidatesRef.current.get(from) || [];
+        q.push(candidate);
+        pendingCandidatesRef.current.set(from, q);
+        console.log(`ICE[${from}] -> queued candidate (no PC yet)`);
+        return;
+      }
+      try {
+        if (pc.remoteDescription && pc.remoteDescription.type) {
+          await pc.addIceCandidate(candidate);
+          console.log(`ICE[${from}] -> added candidate`);
+        } else {
+          const q = pendingCandidatesRef.current.get(from) || [];
+          q.push(candidate);
+          pendingCandidatesRef.current.set(from, q);
+          console.log(`ICE[${from}] -> queued candidate (remoteDesc missing)`);
+        }
+      } catch (err) {
+        console.error("Error adding ICE candidate", err);
+      }
+    };
+
+    const handleUserLeft = ({ socketId }) => {
+      console.log("user-left", socketId);
+      const pc = peerConnectionsRef.current.get(socketId);
+      if (pc) {
+        try {
+          pc.close();
+        } catch (e) {}
+        peerConnectionsRef.current.delete(socketId);
+      }
+      pendingCandidatesRef.current.delete(socketId);
+      makingOfferRef.current.delete(socketId);
+      ignoreOfferRef.current.delete(socketId);
+      setRemoteStreamsMap((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(socketId);
+        return newMap;
+      });
+    };
+
+    socketApi.on("user-joined", handleUserJoined);
+    socketApi.on("offer", handleOffer);
+    socketApi.on("answer", handleAnswer);
+    socketApi.on("ice-candidate", handleIceCandidate);
+    socketApi.on("user-left", handleUserLeft);
+
+    return () => {
+      socketApi.off("user-joined", handleUserJoined);
+      socketApi.off("offer", handleOffer);
+      socketApi.off("answer", handleAnswer);
+      socketApi.off("ice-candidate", handleIceCandidate);
+      socketApi.off("user-left", handleUserLeft);
+    };
+  }, [interviewID]);
 
   useEffect(() => {
     if (!socket) return;
@@ -302,137 +516,23 @@ const VideoCall = () => {
       timeoutRef.id = setTimeout(() => {
         setShowRedAlert(false);
         timeoutRef.id = null;
-      }, 10000);
+      }, 1000);
     };
 
     // attach listener once
     socket.on("Received-Red-Alert", handleReceivedRedAlert);
     console.log("Listening for Received-Red-Alert");
 
-    // cleanup when socket changes / component unmounts
     return () => {
       socket.off("Received-Red-Alert", handleReceivedRedAlert);
       if (timeoutRef.id) clearTimeout(timeoutRef.id);
     };
   }, [socket]);
 
-  // WebRTC signaling handlers
-  useEffect(() => {
-    const handleOffer = async ({ offer, from }) => {
-      console.log(`📥 Received offer from ${from}`);
-      console.log("📋 Offer details:", offer);
-
-      const peerConnection = createPeerConnection(from);
-      setPeerConnections((prev) => new Map(prev.set(from, peerConnection)));
-
-      try {
-        await peerConnection.setRemoteDescription(offer);
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        console.log(`📤 Sending answer to ${from}`);
-
-        socketApi.emit("answer", {
-          interviewID,
-          answer,
-          to: from,
-        });
-      } catch (error) {
-        console.error("❌ Error handling offer:", error);
-      }
-    };
-
-    const handleAnswer = async ({ answer, from }) => {
-      console.log(`📥 Received answer from ${from}`);
-      console.log("📋 Answer details:", answer);
-
-      const peerConnection = peerConnections.get(from);
-      if (peerConnection) {
-        try {
-          await peerConnection.setRemoteDescription(answer);
-          console.log(`✅ Set remote description for ${from}`);
-        } catch (error) {
-          console.error("❌ Error setting remote description:", error);
-        }
-      }
-    };
-
-    const handleIceCandidate = async ({ candidate, from }) => {
-      console.log(`🧊 Received ICE candidate from ${from}`);
-
-      const peerConnection = peerConnections.get(from);
-      if (peerConnection) {
-        try {
-          await peerConnection.addIceCandidate(candidate);
-          console.log(`✅ Added ICE candidate for ${from}`);
-        } catch (error) {
-          console.error("❌ Error adding ICE candidate:", error);
-        }
-      }
-    };
-
-    const handleUserLeft = ({ socketId }) => {
-      console.log(`👋 User left: ${socketId}`);
-
-      const peerConnection = peerConnections.get(socketId);
-      if (peerConnection) {
-        peerConnection.close();
-        setPeerConnections((prev) => {
-          const newMap = new Map(prev);
-          newMap.delete(socketId);
-          return newMap;
-        });
-      }
-
-      setRemoteStreams((prev) => {
-        const newMap = new Map(prev);
-        newMap.delete(socketId);
-        return newMap;
-      });
-    };
-
-    const handleUserJoined = async ({ username: joinedUsername, socketId }) => {
-      console.log(`👋 ${joinedUsername} joined the room with ${socketId}`);
-
-      const peerConnection = createPeerConnection(socketId);
-      setPeerConnections((prev) => new Map(prev.set(socketId, peerConnection)));
-
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        console.log(`📤 Sending offer to ${socketId}`);
-
-        socketApi.emit("offer", {
-          interviewID,
-          offer,
-          to: socketId,
-        });
-      } catch (error) {
-        console.error("❌ Error creating offer:", error);
-      }
-    };
-
-    socketApi.on("user-joined", handleUserJoined);
-    socketApi.on("offer", handleOffer);
-    socketApi.on("answer", handleAnswer);
-    socketApi.on("ice-candidate", handleIceCandidate);
-    socketApi.on("user-left", handleUserLeft);
-
-    return () => {
-      socketApi.off("offer", handleOffer);
-      socketApi.off("answer", handleAnswer);
-      socketApi.off("ice-candidate", handleIceCandidate);
-      socketApi.off("user-left", handleUserLeft);
-    };
-  }, [localStream, peerConnections, interviewID]);
-
   const handleProctorEvent = (event) => {
     console.log("PROCTOR EVENT:", event);
     const { details, timestamp, type } = event;
-    const newEvent = {
-      eventType: type,
-      timestamp: pretty(timestamp),
-      details: details,
-    };
+    const newEvent = { eventType: type, timestamp, details };
     setMeetingData((prev) => ({ ...prev, events: [...prev.events, newEvent] }));
   };
 
@@ -445,87 +545,155 @@ const VideoCall = () => {
   const handleItemDetected = (event) => {
     console.log("ITEM DETECTED", event);
     const { type, label, score, timestamp, snapshot } = event;
-    const newEvent = {
-      eventType: type,
-      timestamp: pretty(timestamp),
-      details: label,
-    };
+    const newEvent = { eventType: type, timestamp, details: label };
     setMeetingData((prev) => ({ ...prev, events: [...prev.events, newEvent] }));
     socket.emit("Red-Alert", { interviewID, username, label });
   };
 
-  // run detection only for candidate
-  useObjectDetection(
-    videoRef,
-    handleItemDetected,
-    role === "candidate" // enabled only for candidate
-  );
+  useObjectDetection(videoRef, handleItemDetected, role === "candidate");
 
   return (
-    <div>
+    <div className="min-h-screen w-full flex flex-col items-center bg-gradient-to-b from-gray-900 via-black to-gray-900 text-white p-6 relative">
       <AnimatePresence>
         {showRedAlert && (
           <motion.div
-            className="absolute bottom-10 right-10 z-50"
+            className="absolute bottom-8 right-8 z-50"
             variants={alertVariants}
             initial="hidden"
             animate="visible"
             exit="exit"
           >
-            <h1 className="bg-blue-800 text-white py-2 px-4 rounded-lg shadow-lg">
-              🚨 {redAlert?.name} is using {redAlert?.label}
-            </h1>
+            <div className="rounded-xl bg-amber-600/95 ring-1 ring-amber-300/20 shadow-lg px-4 py-2 flex items-center gap-3">
+              <span className="text-lg">🚨</span>
+              <div className="text-sm">
+                <div className="font-semibold">{redAlert?.name}</div>
+                <div className="text-xs text-amber-100/90">
+                  is using {redAlert?.label}
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-      <h1>Video Call</h1>
-      <p>Interview ID: {interviewID}</p>
-      <p>Username: {username}</p>
-      <p>Role: {role}</p>
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        className="w-sm rounded-2xl absolute top-8 right-8 h-auto bg-black"
-      />
-      <div className="w-4xl h-auto bg-black">
-        {remoteStreams.size === 0 ? (
-          <div className="text-center text-gray-400">
-            <div className="text-6xl mb-4">📹</div>
-            <div>Waiting for other participants...</div>
-          </div>
-        ) : (
-          Array.from(remoteStreams.entries()).map(([socketId, stream]) => {
-            if (remoteRef) {
-              remoteRef.current.srcObject = stream;
-            }
 
-            return (
-              <div key={socketId} className="relative m-2">
+      {/* Header / Info */}
+      <header className="w-full max-w-5xl mb-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-indigo-300">
+              Video Call
+            </h1>
+            <p className="text-sm text-gray-400 mt-1">Live interview session</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="px-3 py-1 rounded-lg bg-white/3 text-sm text-gray-200 border border-white/5">
+              <span className="text-xs text-gray-300">Interview ID</span>
+              <div className="font-medium text-sm truncate max-w-[140px]">
+                {interviewID}
+              </div>
+            </div>
+
+            <div className="px-3 py-1 rounded-lg bg-white/3 text-sm text-gray-200 border border-white/5">
+              <span className="text-xs text-gray-300">User</span>
+              <div className="font-medium text-sm">{username}</div>
+            </div>
+
+            <div className="px-3 py-1 rounded-lg bg-white/3 text-sm text-gray-200 border border-white/5">
+              <span className="text-xs text-gray-300">Role</span>
+              <div className="font-medium text-sm">{role}</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* small local preview (keeps your exact video element and ref) */}
+      <div className="absolute top-33 right-8 z-40">
+        <div className="w-40 md:w-52 rounded-2xl overflow-hidden bg-black/60 border border-white/6 shadow-xl">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-auto bg-black"
+          />
+          <div className="px-3 py-2 bg-black/60 flex items-center justify-between text-xs text-gray-300">
+            <span>You</span>
+            <span className="text-amber-300">
+              {isRecording ? "Recording" : "Live"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Remote streams area */}
+      <main className="w-full max-w-7xl mt-4">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="grid gap-4 grid-cols-1 sm:grid-cols-1 lg:grid-cols-1"
+        >
+          {remoteStreamsMap.size === 0 ? (
+            <div className="col-span-full flex flex-col items-center justify-center py-24 rounded-lg bg-black/40 border border-white/6 text-center">
+              <div className="text-6xl mb-4">📹</div>
+              <div className="text-gray-400">
+                Waiting for other participants...
+              </div>
+            </div>
+          ) : (
+            Array.from(remoteStreamsMap.entries()).map(([socketId, stream]) => (
+              <div
+                key={socketId}
+                className="relative rounded-lg overflow-hidden bg-gradient-to-br from-gray-900/60 to-black/40 border border-white/6 shadow-lg"
+              >
                 <video
-                  ref={remoteRef}
                   autoPlay
                   playsInline
-                  className="w-full h-full rounded-lg bg-gray-900"
+                  className="w-full h-full object-cover aspect-video rounded-2xl bg-gray-900"
+                  ref={(el) => {
+                    if (el) {
+                      remoteVideoRefs.current.set(socketId, el);
+                      if (el.srcObject !== stream) {
+                        try {
+                          el.srcObject = stream;
+                        } catch (e) {
+                          console.error("set srcObject failed", e);
+                        }
+                      }
+                    } else {
+                      remoteVideoRefs.current.delete(socketId);
+                    }
+                  }}
                 />
-                <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                <div className="absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-xs text-white">
                   {socketId.slice(0, 8)}...
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
+            ))
+          )}
+        </motion.div>
+      </main>
+
+      {/* Recording saved indicator */}
       {recordedBlob && (
-        <p className="text-green-500 mt-2">Recording saved locally ✅</p>
+        <div className="mt-4">
+          <span className="inline-flex items-center gap-2 bg-emerald-700/20 text-emerald-300 px-3 py-1 rounded-md text-sm border border-emerald-600/20 shadow-sm">
+            ✅ Recording saved locally
+          </span>
+        </div>
       )}
-      <button
-        onClick={() => handleEndCall()}
-        className="px-4 py-2 bg-red-600 text-white rounded shadow cursor-pointer hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-        disabled={!isRecording && !isCameraOn}
-      >
-        End Call & Save Recording
-      </button>
+
+      {/* Actions */}
+      <div className="mt-6 flex items-center gap-4">
+        <button
+          onClick={() => handleEndCall()}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition"
+          disabled={!isRecording && !isCameraOn}
+        >
+          End Call & Save Recording
+        </button>
+      </div>
     </div>
   );
 };
