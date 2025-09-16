@@ -14,6 +14,7 @@ const pretty = (iso) =>
 
 const connectToServer = (httpServer) => {
   io = new Server(httpServer, {
+    path: "/socket.io",  
     cors: {
       origin: ["http://localhost:5173", "https://tutedude-frontend-nche.onrender.com"],
       methods: ["GET", "POST"],
