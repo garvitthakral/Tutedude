@@ -516,7 +516,7 @@ const VideoCall = () => {
       timeoutRef.id = setTimeout(() => {
         setShowRedAlert(false);
         timeoutRef.id = null;
-      }, 1000);
+      }, 10000);
     };
 
     // attach listener once

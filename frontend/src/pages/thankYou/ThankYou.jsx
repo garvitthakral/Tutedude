@@ -22,7 +22,7 @@ const ThankYou = () => {
   };
 
   const pretty = (iso) => {
-    new Date(iso).toLocaleString("en-IN", {
+    return new Date(iso).toLocaleString("en-IN", {
       dateStyle: "medium",
       timeStyle: "short",
       timeZone: "Asia/Kolkata",
@@ -197,7 +197,6 @@ const ThankYou = () => {
         {loading && <Loader size="xl" />}
       </motion.div>
 
-      {/* ====== Reports container: constrained height + scroll ====== */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
