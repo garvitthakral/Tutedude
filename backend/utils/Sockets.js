@@ -6,20 +6,25 @@ import Candidate from "../models/Candidate.js";
 let io;
 
 const pretty = (iso) =>
-    new Date(iso).toLocaleString("en-IN", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: "Asia/Kolkata",
-    });
+  new Date(iso).toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata",
+  });
 
 const connectToServer = (httpServer) => {
   io = new Server(httpServer, {
-    path: "/socket.io",  
+    path: "/socket.io",
     cors: {
-      origin: ["http://localhost:5173", "https://tutedude-frontend-nche.onrender.com"],
+      origin: [
+        "http://localhost:5173",
+        "https://tutedude-frontend-nche.onrender.com",
+      ],
       methods: ["GET", "POST"],
       credentials: true,
     },
+    transports: ["websocket", "polling"],
+    withCredentials: true,
   });
 
   io.on("connect", (socket) => {
@@ -67,22 +72,22 @@ const connectToServer = (httpServer) => {
     // });
 
     socket.on("offer", ({ roomId, offer, to }) => {
-      console.log("enter in offer")
+      console.log("enter in offer");
       socket.to(to).emit("offer", { offer, from: socket.id });
     });
 
     socket.on("answer", ({ roomId, answer, to }) => {
-      console.log("enter in ans")
+      console.log("enter in ans");
       socket.to(to).emit("answer", { answer, from: socket.id });
     });
 
     socket.on("ice-candidate", ({ roomId, candidate, to }) => {
-      console.log("enter in ice-candidate")
+      console.log("enter in ice-candidate");
       socket.to(to).emit("ice-candidate", { candidate, from: socket.id });
     });
 
     socket.on("leave-call", ({ roomId }) => {
-      console.log("enter in cll")
+      console.log("enter in cll");
       socket.to(roomId).emit("user-left", { socketId: socket.id });
       socket.leave(roomId);
     });
